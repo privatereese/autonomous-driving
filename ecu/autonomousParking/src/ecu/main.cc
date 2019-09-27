@@ -34,7 +34,11 @@ extern "C" {
 
 #include <base/attached_rom_dataspace.h>
 #include <libc/component.h>
+#include <semaphore.h>
 
+sem_t allValSem;
+sem_t allData;
+int allValues;
 
 /* Float variables that are updated on realtime by on message calls
    Needed to feed the parking algorithm with up to date values */

@@ -36,6 +36,7 @@ extern "C" {
 #include <base/attached_rom_dataspace.h>
 #include <libc/component.h>
 #include <base/thread.h>
+#include <semaphore.h>
 
 
 class Ckpt_thread : public Genode::Thread
@@ -43,11 +44,12 @@ class Ckpt_thread : public Genode::Thread
 private:
    Genode::Env &_env;
    Proto_client &client;
-	Publisher &pub;
+   Subscriber &sub;
+   Publisher &pub;
 
 
 public:
-        Ckpt_thread(Genode::Env &env, Publisher &_pub, Proto_client &_client)
+        Ckpt_thread(Genode::Env &env, Subscriber &_sub, Publisher &_pub, Proto_client &_client)
                 :
                 _env(env),
                 Thread(env,
@@ -57,12 +59,16 @@ public:
                        Genode::Thread::Weight(),
                        env.cpu()),
 				client(_client),
-				pub(_pub)
+				pub(_pub),
+				sub(_sub)
         {
 			start();
 		}
 
 void entry() {
+	/* endless loop with auto reconnect */
+	sub.loop_start();
+	pub.loop_start();
 	client.serve(&pub, _env);
 }
 
@@ -80,6 +86,10 @@ bool autonomous;
 Timer::Connection timer;
 uint64_t starttime,stoptime,duration,totalduration,calculationroundscounter,minval,maxval = 0;
 uint64_t CONNstarttime,CONNstoptime,CONNduration,CONNtotalduration,CONNcalculationroundscounter,CONNminval,CONNmaxval = 0;
+
+sem_t allValSem;
+sem_t allData;
+int allValues;
 
 void Publisher::my_publish(const char* name, float value) {
 	char buffer[1024] = { 0 };
@@ -108,7 +118,6 @@ void Subscriber::on_message(const struct mosquitto_message *message) {
 	{
 		payload.erase(0, payload.find(",")+1);
 		brake=atof(payload.c_str());
-		Genode::log("Der Bremser ist!!!", brake);
 
 	}
 	if(!strcmp(name,"2"))
@@ -136,6 +145,15 @@ void Subscriber::on_message(const struct mosquitto_message *message) {
 		speed=atof(payload.c_str());
 	}
 
+	/*
+	sem_wait(&allValSem);
+	allValues = (allValues + 1) % 4;
+	if (!allValues)
+	{
+		sem_post(&allData);
+	}
+	sem_post(&allValSem);
+	*/
 	stoptime = timer.elapsed_ms();
 	duration = stoptime - starttime;
 	totalduration += duration;
@@ -231,7 +249,6 @@ void Proto_client::serve(Publisher *publisher, Genode::Env &env)
 		lwip_read(_listen_socket, &size, ntohl(4));
 		if (size>0)
 		{
-			Genode::log("wir sind in while");
 			/* Receive message of told size from SD2 */
 			lwip_read(_listen_socket, bar, ntohl(size));
 			protobuf::State state;
@@ -290,7 +307,7 @@ void Proto_client::serve(Publisher *publisher, Genode::Env &env)
 			ctrl.set_steer(steer);
 			ctrl.set_accelcmd(accel);
 			ctrl.set_brakecmd(brake);
-			Genode::log("Bremse ist", brake);
+			//Genode::log("Bremse ist", brake);
 			ctrl.set_speed(speed);
 			ctrl.set_autonomous(autonomous);
 			/* Serialize control to String */
@@ -298,6 +315,7 @@ void Proto_client::serve(Publisher *publisher, Genode::Env &env)
 			/* Get size of serialized String */
 			int32_t m_length=foo.size();
 			/* Send size of serialized String to SD2 */
+			//sem_wait(&allData);
 			lwip_write(_listen_socket,&m_length,4);
 			/* Send serialized String to SD2 */
 			lwip_write(_listen_socket,(void*)foo.c_str(),foo.size());
@@ -346,6 +364,9 @@ void Libc::Component::construct(Libc::Env &env)
 	//lwip_tcpip_init(); /* causes freeze, code works fine without it */
 
 	Genode::Attached_rom_dataspace _config(env,"config");
+
+	sem_init(&allValSem, 0, 1);
+	sem_init(&allData, 0, 0);
 
 	enum { BUF_SIZE = Nic::Packet_allocator::DEFAULT_PACKET_SIZE * 128 };
 
@@ -412,14 +433,11 @@ void Libc::Component::construct(Libc::Env &env)
 	Genode::log("done");
 
 	
-	/* endless loop with auto reconnect */
-	sub->loop_start();
-	pub->loop_start();
-	
+
 
 	/* use loop_start instead of loop_forever to be able to run line below */
 	/* start TCP/IP loop */
-	Ckpt_thread* client_thread = new Ckpt_thread(env, *pub, *client);
+	Ckpt_thread* client_thread = new Ckpt_thread(env, *sub, *pub, *client);
 
 	/* cleanup */
 //	mosqpp::lib_cleanup();
