@@ -41,17 +41,24 @@ float steer, brake, accel, speed;
 /* Boolean value is used to store state of driving */
 bool autonomous;
 
+
+Timer::Connection timer;
+uint64_t starttime,stoptime,duration,totalduration,calculationroundscounter,minval,maxval = 0;
+uint64_t CONNstarttime,CONNstoptime,CONNduration,CONNtotalduration,CONNcalculationroundscounter,CONNminval,CONNmaxval = 0;
+
 void Publisher::my_publish(const char* name, float value) {
 	char buffer[1024] = { 0 };
 	sprintf(buffer, "%s; %f;", name, value);
 	/* int ret = */ publish(NULL, "state", strlen(buffer), buffer);
-	//PDBG("pub state '%s' successful: %d", buffer, MOSQ_ERR_SUCCESS == ret);
+	//Genode::log("pub state '%s' successful: %d", buffer, MOSQ_ERR_SUCCESS == ret);
 }
 
-/* Receive car control messages from server and store them in corresponding values localy.
+/* Receive car control messages from server and store them in corresponding values locally.
    The values are then forwared to SD2. */
 void Subscriber::on_message(const struct mosquitto_message *message) {
-	//PDBG("%s %s", message->topic, message->payload);
+	//Genode::log("%s %s", message->topic, message->payload);
+
+	starttime = timer.elapsed_ms();
 
 	/* Take first part of message, alias identifier to decide which value arrived */
 	std::string payload = (char*)message->payload;
@@ -92,6 +99,25 @@ void Subscriber::on_message(const struct mosquitto_message *message) {
 		payload.erase(0, payload.find(",")+1);
 		speed=atof(payload.c_str());
 	}
+
+	stoptime = timer.elapsed_ms();
+	duration = stoptime - starttime;
+	totalduration += duration;
+	calculationroundscounter++;
+
+	if (calculationroundscounter == 1){
+		minval = duration;
+	}
+	minval = std::min(minval,duration);
+	maxval = std::max(maxval,duration);
+
+	if(calculationroundscounter % 500 == 0){
+	Genode::log("The duration for calculation and sending was ", duration ," milliseconds");
+	Genode::log("The TOTALduration for calculation and sending was ", totalduration ," milliseconds");
+	Genode::log("The MINduration for calculation and sending was ", minval ," milliseconds");
+	Genode::log("The MAXduration for calculation and sending was ", maxval ," milliseconds");
+	Genode::log("The AVERAGEduration for calculation and sending was ", (totalduration / calculationroundscounter) ," milliseconds after ", calculationroundscounter, " steps");
+	}
 }
 
 Proto_client::Proto_client() :
@@ -122,7 +148,7 @@ Proto_client::Proto_client() :
 		PERR("No socket available!");
 		return;
 	}
-	PDBG("listen socket\n");
+	Genode::log("listen socket\n");
 
 	if (lwip_connect(_listen_socket, (struct sockaddr*)&_in_addr, sizeof(_in_addr)))
 	{
@@ -154,6 +180,8 @@ void Proto_client::serve(Publisher *publisher)
 	char* bar=Genode::env()->rm_session()->attach(state_ds);
 	while (true)
 	{
+		CONNstarttime = timer.elapsed_ms();
+
 		/* Set size to 0 are every loop */
 		size=0;
 		/* Get size of message from SD2 */
@@ -233,6 +261,26 @@ void Proto_client::serve(Publisher *publisher)
 		{
 			//PWRN("Unknown message: %d", size);
 		}
+
+	CONNstoptime = timer.elapsed_ms();
+	CONNduration = CONNstoptime - CONNstarttime;
+	CONNtotalduration += CONNduration;
+	CONNcalculationroundscounter++;
+
+	if (CONNcalculationroundscounter == 1){
+		CONNminval = CONNduration;
+	}
+	CONNminval = std::min(CONNminval,CONNduration);
+	CONNmaxval = std::max(CONNmaxval,CONNduration);
+
+	if(CONNcalculationroundscounter % 500 == 0){
+	Genode::log("The CONNduration for calculation and sending was ", CONNduration ," milliseconds");
+	Genode::log("The CONNTOTALduration for calculation and sending was ", CONNtotalduration ," milliseconds");
+	Genode::log("The CONNMINduration for calculation and sending was ", CONNminval ," milliseconds");
+	Genode::log("The CONNMAXduration for calculation and sending was ", CONNmaxval ," milliseconds");
+	Genode::log("The CONNAVERAGEduration for calculation and sending was ", (CONNtotalduration / CONNcalculationroundscounter) ," milliseconds after ", CONNcalculationroundscounter, " steps");
+	}
+
 	}
 	Genode::env()->ram_session()->free(state_ds);
 }
@@ -258,7 +306,7 @@ int main(int argc, char* argv[]) {
 
 	/* Init network ... */
 	if (network.attribute_value<bool>("dhcp", true)) {
-		PDBG("DHCP network...");
+		Genode::log("DHCP network...");
 		if (lwip_nic_init(0,
 		                  0,
 		                  0,
@@ -268,12 +316,12 @@ int main(int argc, char* argv[]) {
 			return 1;
 		}
 		/* Wait for DHCP IP assignement */
-		PDBG("waiting 10s for dhcp ip");
+		Genode::log("waiting 10s for dhcp ip");
 		Timer::Connection timer;
 		timer.msleep(10000);
-		PDBG("done");
+		Genode::log("done");
 	} else {
-		PDBG("manual network...");
+		Genode::log("manual network...");
 		char ip_addr[16] = {0};
 		char subnet[16] = {0};
 		char gateway[16] = {0};
@@ -302,20 +350,20 @@ int main(int argc, char* argv[]) {
 	mosquitto.attribute("port").value(port, sizeof(port));
 
 	/* create TCP/IP protobuf connection to and from SD2 */
-	PDBG("protobuf init");
+	Genode::log("protobuf init");
 	Proto_client *client = new Proto_client();
-	PDBG("done");
+	Genode::log("done");
 
 	/* create SAVM publisher */
-	PDBG("savm pub init");
+	Genode::log("savm pub init");
 	Publisher *pub = new Publisher("SAVMPub", ip_addr, atoi(port));
-	PDBG("done");
+	Genode::log("done");
 	
 	/* create SAVM subscriber */
-	PDBG("savm sub init");
+	Genode::log("savm sub init");
 	Subscriber *sub = new Subscriber("SAVMSub", ip_addr, atoi(port));
 	sub->my_subscribe("car-control");
-	PDBG("done");
+	Genode::log("done");
 
 	/* endless loop with auto reconnect */
 	pub->loop_start();

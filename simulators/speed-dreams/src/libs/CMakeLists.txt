@@ -12,7 +12,7 @@ ADD_SUBDIRECTORY(robottools)
 ADD_SUBDIRECTORY(learning)
 ADD_SUBDIRECTORY(math)
 ADD_SUBDIRECTORY(portability)
-
+ADD_SUBDIRECTORY(gamepause)
 
 # Work-in-progress 
 IF(NOT OPTION_OFFICIAL_ONLY)

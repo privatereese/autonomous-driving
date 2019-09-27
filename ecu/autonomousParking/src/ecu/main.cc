@@ -33,6 +33,7 @@ extern "C" {
 /*parking*/
 #include "Parking.h"
 
+
 /* Float variables that are updated on realtime by on message calls
    Needed to feed the parking algorithm with up to date values */
 float steer, brake, accel, spinVel0, spinVel1, spinVel2, spinVel3, length, width, wheelRadius, gps_x, gps_y, laser0, laser1, laser2, laser3, speed, autonomous, steer_max, vel_max=1.5, timestamp, got_go;
@@ -50,16 +51,23 @@ CarInformation *car;
 /* The parking object is called every time all needed information arrived at the ECU to perform the next step of the parking manuver */
 Parking *parking;
 
+Timer::Connection timer;
+uint64_t starttime,stoptime,duration,totalduration,calculationroundscounter,minval,maxval = 0;
+
 void Publisher::my_publish(const char* name, float value) {
 	char buffer[1024] = { 0 };
 	sprintf(buffer, "%s,%f", name, value);
 	/* int ret =*/ publish(NULL, "car-control", strlen(buffer), buffer);
-	//PDBG("pub control '%s' successful: %d", buffer, MOSQ_ERR_SUCCESS == ret);
+	//Genode::log("pub control '%s' successful: %d", buffer, MOSQ_ERR_SUCCESS == ret);
 }
 
 /* Message callback of mosquitto, executed every time a message on the subscribed topic arrives */
 void Subscriber::on_message(const struct mosquitto_message *message) {
-	//PDBG("%s %s", message->topic, message->payload);
+	
+	starttime = timer.elapsed_ms();
+	
+	
+	//Genode::log("%s %s", message->topic, message->payload);
 	std::string payload = (char*)message->payload;
 	
 	/* take first part of message until ";" and compare it to messages from protobuf
@@ -215,6 +223,25 @@ void Subscriber::on_message(const struct mosquitto_message *message) {
 		got_laser2=false;
 		got_spinVel=false;
 	}
+
+	stoptime = timer.elapsed_ms();
+	duration = stoptime - starttime;
+	totalduration += duration;
+	calculationroundscounter++;
+
+	if (calculationroundscounter == 1){
+		minval = duration;
+	}
+	minval = std::min(minval,duration);
+	maxval = std::max(maxval,duration);
+
+	if(calculationroundscounter % 500 == 0){
+	Genode::log("The duration for calculation and sending was ", duration ," milliseconds");
+	Genode::log("The TOTALduration for calculation and sending was ", totalduration ," milliseconds");
+	Genode::log("The MINduration for calculation and sending was ", minval ," milliseconds");
+	Genode::log("The MAXduration for calculation and sending was ", maxval ," milliseconds");
+	Genode::log("The AVERAGEduration for calculation and sending was ", (totalduration / calculationroundscounter) ," milliseconds after ", calculationroundscounter, " steps");
+	}
 }
 
 int main(int argc, char* argv[]) {
@@ -227,7 +254,7 @@ int main(int argc, char* argv[]) {
 	Genode::Xml_node network = Genode::config()->xml_node().sub_node("network");
 
 	if (network.attribute_value<bool>("dhcp", true)) {
-		PDBG("DHCP network...");
+		Genode::log("DHCP network...");
 		if (lwip_nic_init(0,
 		                  0,
 		                  0,
@@ -236,13 +263,12 @@ int main(int argc, char* argv[]) {
 			PERR("lwip init failed!");
 			return 1;
 		}
-		/* dhcp assignement takes some time... */
-		PDBG("Waiting 10s for ip assignement");
-		Timer::Connection timer;
+		/* dhcp assignment takes some time... */
+		Genode::log("Waiting 10s for ip assignement");
 		timer.msleep(10000);
-		PDBG("done");
+		Genode::log("done");
 	} else {
-		PDBG("manual network...");
+		Genode::log("manual network...");
 		char ip_addr[16] = {0};
 		char subnet[16] = {0};
 		char gateway[16] = {0};
@@ -259,7 +285,7 @@ int main(int argc, char* argv[]) {
 			PERR("lwip init failed!");
 			return 1;
 		}
-		PDBG("done");
+		Genode::log("done");
 	}
 
 	/* get config */
@@ -272,15 +298,15 @@ int main(int argc, char* argv[]) {
 	mosquitto.attribute("port").value(port, sizeof(port));
 
 	/* create ECU subscriber */
-	PDBG("Ecu sub init");
+	Genode::log("Ecu sub init");
 	Subscriber *sub = new Subscriber("EcuSub", ip_addr, atoi(port));
 	sub->my_subscribe("state");
-	PDBG("done");
+	Genode::log("done");
 
 	/* create ECU publisher */
-	PDBG("Ecu pub init");
+	Genode::log("Ecu pub init");
 	pub = new Publisher("EcuPub", ip_addr, atoi(port));
-	PDBG("done");
+	Genode::log("done");
 
 	/* initiate any value with false, you never know... */
 	got_laser0=false;
@@ -293,7 +319,7 @@ int main(int argc, char* argv[]) {
 	got_wheelRadius=false;
 	go=false;
 
-	PDBG("done");
+	Genode::log("done");
 
 	/* endless loop with auto reconnect */
 	pub->loop_start();
