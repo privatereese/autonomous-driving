@@ -11,7 +11,6 @@
 #include <base/env.h>
 #include <base/printf.h>
 #include <util/xml_node.h>
-#include <os/config.h>
 
 /* lwip includes */
 extern "C" {
@@ -32,6 +31,9 @@ extern "C" {
 
 /*parking*/
 #include "Parking.h"
+
+#include <base/attached_rom_dataspace.h>
+#include <libc/component.h>
 
 
 /* Float variables that are updated on realtime by on message calls
@@ -188,7 +190,7 @@ void Subscriber::on_message(const struct mosquitto_message *message) {
 	{
 		payload.erase(0, payload.find(";")+2);
 		got_go=atof(payload.substr(0, payload.find(";")).c_str());
-		/* protobuf publishes a flot for go,
+		/* protobuf publishes a float for go,
 		   which has to become a boolean here */
 		if(got_go>0)
 		{
@@ -217,6 +219,7 @@ void Subscriber::on_message(const struct mosquitto_message *message) {
 	   and autonomous parking is desired, let the algorithm do its thing */
 	if(go&&got_laser0&&got_laser1&&got_laser2&&got_spinVel)
 	{
+		//Genode::log("laser0: ", laser0, " laser1: ",laser1," laser2: ", laser2, " laser3: " ,laser3 , " spinvel: ",spinVel0);
 		parking->receiveData(laser0, laser1, laser2,spinVel0,timestamp,pub);
 		got_laser0=false;
 		got_laser1=false;
@@ -244,14 +247,21 @@ void Subscriber::on_message(const struct mosquitto_message *message) {
 	}
 }
 
-int main(int argc, char* argv[]) {
+
+
+void Libc::Component::construct(Libc::Env &env)
+{
+	Libc::with_libc([&] () {
 	//lwip_tcpip_init(); /* causes freeze, code works fine without it */
 
 	/* network initialization... */
 
 	enum { BUF_SIZE = Nic::Packet_allocator::DEFAULT_PACKET_SIZE * 128 };
 
-	Genode::Xml_node network = Genode::config()->xml_node().sub_node("network");
+
+	Genode::Attached_rom_dataspace _config(env,"config");
+
+	Genode::Xml_node network = _config.xml().sub_node("network");
 
 	if (network.attribute_value<bool>("dhcp", true)) {
 		Genode::log("DHCP network...");
@@ -261,10 +271,9 @@ int main(int argc, char* argv[]) {
 		                  BUF_SIZE,
 		                  BUF_SIZE)) {
 			PERR("lwip init failed!");
-			return 1;
 		}
 		/* dhcp assignment takes some time... */
-		Genode::log("Waiting 10s for ip assignement");
+		Genode::log("Waiting 10s for ip assignment");
 		timer.msleep(10000);
 		Genode::log("done");
 	} else {
@@ -283,13 +292,12 @@ int main(int argc, char* argv[]) {
 		                  BUF_SIZE,
 		                  BUF_SIZE)) {
 			PERR("lwip init failed!");
-			return 1;
 		}
 		Genode::log("done");
 	}
 
 	/* get config */
-	Genode::Xml_node mosquitto = Genode::config()->xml_node().sub_node("mosquitto");
+	Genode::Xml_node mosquitto = _config.xml().sub_node("mosquitto");
 
 	char ip_addr[16] = {0};
 	char port[5] = {0};
@@ -321,13 +329,19 @@ int main(int argc, char* argv[]) {
 
 	Genode::log("done");
 
+
+	
 	/* endless loop with auto reconnect */
 	pub->loop_start();
 	sub->loop_forever();
+
+
 	/* loop_start creates a thread and makes it possible to execute code afterwards
 	   loop_forever creates a thread and lets no code run afterwards */
-
 	/* cleanup */
-	mosqpp::lib_cleanup();
-	return 0;
+	//mosqpp::lib_cleanup();
+	});
 }
+
+
+

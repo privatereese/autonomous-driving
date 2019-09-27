@@ -25,13 +25,48 @@ extern "C" {
 #include <base/env.h>
 #include <base/printf.h>
 #include <util/xml_node.h>
-#include <os/config.h>
-#include <ram_session/connection.h>
+
+#include <pd_session/connection.h>
 #include <timer_session/connection.h>
 
 /* etc */
 #include <cstdio>
 #include <cstring>
+
+#include <base/attached_rom_dataspace.h>
+#include <libc/component.h>
+#include <base/thread.h>
+
+
+class Ckpt_thread : public Genode::Thread
+{
+private:
+   Genode::Env &_env;
+   Proto_client &client;
+	Publisher &pub;
+
+
+public:
+        Ckpt_thread(Genode::Env &env, Publisher &_pub, Proto_client &_client)
+                :
+                _env(env),
+                Thread(env,
+                       "ckpt_thread",
+                       64*1024,
+                       env.cpu().affinity_space().location_of_index(1),
+                       Genode::Thread::Weight(),
+                       env.cpu()),
+				client(_client),
+				pub(_pub)
+        {
+			start();
+		}
+
+void entry() {
+	client.serve(&pub, _env);
+}
+
+};	
 
 /* Float variables are used to store the last step of parking calculation.
    If no updated value arrives at SAVM before SD2 requires a new car control protobuf message,
@@ -73,6 +108,7 @@ void Subscriber::on_message(const struct mosquitto_message *message) {
 	{
 		payload.erase(0, payload.find(",")+1);
 		brake=atof(payload.c_str());
+		Genode::log("Der Bremser ist!!!", brake);
 
 	}
 	if(!strcmp(name,"2"))
@@ -120,7 +156,7 @@ void Subscriber::on_message(const struct mosquitto_message *message) {
 	}
 }
 
-Proto_client::Proto_client() :
+Proto_client::Proto_client(Genode::Attached_rom_dataspace &_config) :
 	_listen_socket(0),
 	_in_addr{0},
 	_target_addr{0}
@@ -131,7 +167,7 @@ Proto_client::Proto_client() :
 	enum { BUF_SIZE = Nic::Packet_allocator::DEFAULT_PACKET_SIZE * 128 };
 
 	/* Get values from run file */
-	Genode::Xml_node speedDreams = Genode::config()->xml_node().sub_node("speedDreams");
+	Genode::Xml_node speedDreams = _config.xml().sub_node("speedDreams");
 
 	char ip_addr[16] = {0};
 	char port[5] = {0};
@@ -142,6 +178,13 @@ Proto_client::Proto_client() :
 	_in_addr.sin_addr.s_addr = inet_addr(ip_addr);
 	_in_addr.sin_family = AF_INET;
 	_in_addr.sin_port = htons(atoi(port));
+
+	const char* port_ = port;
+	const char* ip_addr_ = ip_addr;
+
+	Genode::log("Port zu SpeedDreams ist: " , port_);
+	Genode::log("IP zu SpeedDreams ist: " , ip_addr_);
+
 
 	if ((_listen_socket = lwip_socket(AF_INET, SOCK_STREAM, 0)) < 0)
 	{
@@ -170,14 +213,14 @@ Proto_client::~Proto_client()
 	
 }
 
-void Proto_client::serve(Publisher *publisher)
+void Proto_client::serve(Publisher *publisher, Genode::Env &env)
 {
 	/* Init size of protobuf message with 0 */
 	int size = 0;
 	/* Allocate ram dataspace where protobuf message will be stored */
-	Genode::Ram_dataspace_capability state_ds=Genode::env()->ram_session()->alloc(1024);
+	Genode::Ram_dataspace_capability state_ds=env.pd().alloc(4096);
 	/* Attach dataspace to our rm session */
-	char* bar=Genode::env()->rm_session()->attach(state_ds);
+	char* bar=env.rm().attach(state_ds);
 	while (true)
 	{
 		CONNstarttime = timer.elapsed_ms();
@@ -188,6 +231,7 @@ void Proto_client::serve(Publisher *publisher)
 		lwip_read(_listen_socket, &size, ntohl(4));
 		if (size>0)
 		{
+			Genode::log("wir sind in while");
 			/* Receive message of told size from SD2 */
 			lwip_read(_listen_socket, bar, ntohl(size));
 			protobuf::State state;
@@ -246,6 +290,7 @@ void Proto_client::serve(Publisher *publisher)
 			ctrl.set_steer(steer);
 			ctrl.set_accelcmd(accel);
 			ctrl.set_brakecmd(brake);
+			Genode::log("Bremse ist", brake);
 			ctrl.set_speed(speed);
 			ctrl.set_autonomous(autonomous);
 			/* Serialize control to String */
@@ -259,9 +304,8 @@ void Proto_client::serve(Publisher *publisher)
 		}
 		else
 		{
-			//PWRN("Unknown message: %d", size);
+		//	Genode::log("Unknown message: %d", size);
 		}
-
 	CONNstoptime = timer.elapsed_ms();
 	CONNduration = CONNstoptime - CONNstarttime;
 	CONNtotalduration += CONNduration;
@@ -272,7 +316,6 @@ void Proto_client::serve(Publisher *publisher)
 	}
 	CONNminval = std::min(CONNminval,CONNduration);
 	CONNmaxval = std::max(CONNmaxval,CONNduration);
-
 	if(CONNcalculationroundscounter % 500 == 0){
 	Genode::log("The CONNduration for calculation and sending was ", CONNduration ," milliseconds");
 	Genode::log("The CONNTOTALduration for calculation and sending was ", CONNtotalduration ," milliseconds");
@@ -282,7 +325,7 @@ void Proto_client::serve(Publisher *publisher)
 	}
 
 	}
-	Genode::env()->ram_session()->free(state_ds);
+	env.pd().free(state_ds);
 }
 
 int Proto_client::connect()
@@ -297,12 +340,16 @@ void Proto_client::disconnect()
 }	
 
 
-int main(int argc, char* argv[]) {
+
+void Libc::Component::construct(Libc::Env &env)
+{
 	//lwip_tcpip_init(); /* causes freeze, code works fine without it */
+
+	Genode::Attached_rom_dataspace _config(env,"config");
 
 	enum { BUF_SIZE = Nic::Packet_allocator::DEFAULT_PACKET_SIZE * 128 };
 
-	Genode::Xml_node network = Genode::config()->xml_node().sub_node("network");
+	Genode::Xml_node network = _config.xml().sub_node("network");
 
 	/* Init network ... */
 	if (network.attribute_value<bool>("dhcp", true)) {
@@ -313,9 +360,8 @@ int main(int argc, char* argv[]) {
 		                  BUF_SIZE,
 		                  BUF_SIZE)) {
 			PERR("lwip init failed!");
-			return 1;
 		}
-		/* Wait for DHCP IP assignement */
+		/* Wait for DHCP IP assignment */
 		Genode::log("waiting 10s for dhcp ip");
 		Timer::Connection timer;
 		timer.msleep(10000);
@@ -326,6 +372,7 @@ int main(int argc, char* argv[]) {
 		char subnet[16] = {0};
 		char gateway[16] = {0};
 
+		
 		network.attribute("ip-address").value(ip_addr, sizeof(ip_addr));
 		network.attribute("subnet-mask").value(subnet, sizeof(subnet));
 		network.attribute("default-gateway").value(gateway, sizeof(gateway));
@@ -336,12 +383,11 @@ int main(int argc, char* argv[]) {
 		                  BUF_SIZE,
 		                  BUF_SIZE)) {
 			PERR("lwip init failed!");
-			return 1;
 		}
 	}
 
 	/* get config */
-	Genode::Xml_node mosquitto = Genode::config()->xml_node().sub_node("mosquitto");
+	Genode::Xml_node mosquitto = _config.xml().sub_node("mosquitto");
 
 	char ip_addr[16] = {0};
 	char port[5] = {0};
@@ -351,7 +397,7 @@ int main(int argc, char* argv[]) {
 
 	/* create TCP/IP protobuf connection to and from SD2 */
 	Genode::log("protobuf init");
-	Proto_client *client = new Proto_client();
+	Proto_client *client = new Proto_client(_config);
 	Genode::log("done");
 
 	/* create SAVM publisher */
@@ -365,15 +411,19 @@ int main(int argc, char* argv[]) {
 	sub->my_subscribe("car-control");
 	Genode::log("done");
 
+	
 	/* endless loop with auto reconnect */
-	pub->loop_start();
 	sub->loop_start();
+	pub->loop_start();
+	
 
 	/* use loop_start instead of loop_forever to be able to run line below */
 	/* start TCP/IP loop */
-	client->serve(pub);
+	Ckpt_thread* client_thread = new Ckpt_thread(env, *pub, *client);
 
 	/* cleanup */
-	mosqpp::lib_cleanup();
-	return 0;
+//	mosqpp::lib_cleanup();
 }
+
+
+

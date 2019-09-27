@@ -23,16 +23,17 @@ create_boot_directory
 set config {
 <config>
     <parent-provides>
-        <service name="LOG"/>
-        <service name="RM"/>
-        <service name="ROM"/>
-        <service name="RAM"/>
-        <service name="IO_MEM"/>
-        <service name="IO_PORT"/>
-        <service name="IRQ"/>
-        <service name="CAP"/>
-        <service name="SIGNAL"/>
+      <service name="ROM"/>
+		  <service name="RAM"/>
+  		<service name="IRQ"/>
+  		<service name="IO_MEM"/>
+		  <service name="IO_PORT"/>
+		  <service name="PD"/>
+		  <service name="RM"/>
+		  <service name="CPU"/>
+		  <service name="LOG"/>
     </parent-provides>
+    <default caps="100"/>
     <default-route>
         <any-service> <parent/> <any-child/> </any-service>
     </default-route>
@@ -40,8 +41,8 @@ set config {
         <resource name="RAM" quantum="1M"/>
         <provides><service name="Timer"/></provides>
     </start>
-    <start name="savm">
-        <resource name="RAM" quantum="4M"/>
+    <start name="savm" caps="500">
+        <resource name="RAM" quantum="40M"/>
 				<config>
             <network dhcp="no" ip-address="10.200.45.7" subnet-mask="255.255.255.0" default-gateway="10.200.45.6" />
             <speedDreams ip-address="10.200.45.6" port="9002" />
@@ -49,35 +50,38 @@ set config {
         </config>
     </start>}
 
-    append_if [have_spec gpio] config {
-      <start name="gpio_drv">
-        <resource name="RAM" quantum="4M"/>
-        <provides><service name="Gpio"/></provides>
-        <config/>
-      </start>}
+append_if [have_spec gpio] config {
+	<start name="gpio_drv">
+		<resource name="RAM" quantum="4M"/>
+		<provides><service name="Gpio"/></provides>
+		<config/>
+	</start>}
 
-    append_if $use_usb_driver config {
-      <start name="usb_drv">
-        <resource name="RAM" quantum="64M"/>
-        <provides>
-          <service name="Nic"/>
-        </provides>
-        <config uhci="yes" ehci="yes" xhci="yes">
-          <nic mac="02:00:00:00:01:03"/>
-        </config>
-      </start>}
+append_if $use_usb_driver config {
+	<start name="usb_drv">
+		<resource name="RAM" quantum="12M"/>
+		<provides>
+			<service name="Nic"/>
+		</provides>
+		<config ehci="yes">
+			<nic mac="0A:02:00:00:00:03" />
+			<raw>
+				<policy label="usb_terminal -> usb_serial" vendor_id="0x67b" product_id="0x2303"/>
+			</raw>
+		</config>
+	</start>}
 
-    append_platform_drv_config
+append_platform_drv_config
 
-    append_if $use_nic_driver config {
-      <start name="nic_drv">
-        <resource name="RAM" quantum="4M"/>
-        <provides><service name="Nic"/></provides>
-      </start>}
+append_if $use_nic_driver config {
+	<start name="nic_drv">
+		<resource name="RAM" quantum="4M"/>
+		<provides><service name="Nic"/></provides>
+	</start>}
 
-    append config {
-    </config>
-    }
+append config {
+</config>
+}
 
     install_config $config
 
@@ -85,11 +89,11 @@ set config {
 # Boot image
 #
 
-append qemu_args "-net tap,ifname=tap1,script=no,downscript=no "
-append_if [expr [have_spec x86_64]] qemu_args "-net nic,model=e1000,macaddr=02:00:00:00:01:03 -enable-kvm -m 1024 "
-append_if [expr ![have_spec x86_64]] qemu_args "-net nic,model=lan9118,macaddr=02:00:00:00:01:03 "
+set boot_modules { 
+  core init timer
+  ld.lib.so libc.lib.so stdcxx.lib.so libm.lib.so pthread.lib.so lwip.lib.so libmosquitto.lib.so libssl.lib.so libcrypto.lib.so libprotobuf.lib.so zlib.lib.so
+  savm }
 
-set boot_modules { core init savm ld.lib.so libc.lib.so stdcxx.lib.so libm.lib.so pthread.lib.so timer lwip.lib.so libmosquitto.lib.so libssl.lib.so libcrypto.lib.so libprotobuf.lib.so zlib.lib.so }
 
 # platform-specific modules
 lappend_if $use_usb_driver              boot_modules usb_drv
@@ -100,6 +104,22 @@ append_platform_drv_boot_modules
 
 build_boot_image $boot_modules
 
-append qemu_args " -nographic "
+# qemu config
+append qemu_args " -m 1024 -nographic -smp 4 "
+
+append qemu_args " -net nic,macaddr=02:00:00:00:01:03 "
+
+append_if [have_spec x86]     qemu_args " -net nic,model=e1000 "
+append_if [have_spec lan9118] qemu_args " -net nic,model=lan9118 "
+
+#append qemu_args " -net vde,sock=/tmp/switch1 "
+append qemu_args " -net tap,ifname=tap0,script=no "
+
+#old stuff
+#append qemu_args "-net tap,ifname=tap0,script=no,downscript=no "
+#append_if [expr [have_spec x86_64]] qemu_args "-net nic,model=e1000,macaddr=02:00:00:00:01:03 -enable-kvm -m 1024 "
+#append_if [expr ![have_spec x86_64]] qemu_args "-net nic,model=lan9118,macaddr=02:00:00:00:01:03 "
+
+
 
 run_genode_until forever

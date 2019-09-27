@@ -8,6 +8,7 @@
  */
 #include "Parking.h"
 
+#include <base/component.h>
 #include <base/printf.h>
 
 /* etc */
@@ -34,7 +35,7 @@ bool Parking::_findParkingLot(double sensor_right, double spin_velocity) {
         if(_free_space >= _info.parkingLotLength) {
             return true;
         }
-        // reset amount of free space and update displacements as potetial parking lot was too small
+        // reset amount of free space and update displacements as potential parking lot was too small
         _free_space = 0;
         _map.setLongitudinalDisplacement(0);
         _map.setLateralDisplacement(0);
@@ -188,7 +189,8 @@ void Parking::receiveData(double sensor_front, double sensor_right, double senso
     char buffer1[1024] = { 0 };
     char buffer2[1024] = { 0 };
 
-
+    const char* buffer1_char;
+    const char* buffer2_char;
         // check state of the algorithm
         switch(_state){
 
@@ -218,10 +220,12 @@ void Parking::receiveData(double sensor_front, double sensor_right, double senso
 
                              
                               sprintf(buffer1, "%f",_T);
-                              PDBG("%s", buffer1);
+                              buffer1_char = buffer1;
+                              Genode::log(buffer1_char);
                             
                               sprintf(buffer2, "%f",_local_steer_max);
-                              PDBG("%s", buffer2);
+                              buffer2_char = buffer2;
+                              Genode::log(buffer2_char);
                             
                               // change state to controlling and jump instantly to first evaluation of controlling phase
                               _state = CONTROLLING;

@@ -5,6 +5,7 @@ TOOLCHAIN_TARGET    ?= arm
 
 # options: see tool/create_builddir
 GENODE_TARGET       ?= foc_x86_64
+#GENODE_TARGET       ?= foc_pbxa9
 
 ifneq (,$(findstring if13praktikum, $(shell groups)))
 	VAGRANT_BUILD_DIR         ?= $(shell pwd)/build
@@ -30,8 +31,11 @@ jenkins: foc jenkins_build_dir
 # ================================================================
 # Genode toolchain. Only needs to be done once per target (x86/arm).
 toolchain:
-	wget https://nextcloud.os.in.tum.de/s/9idiw8BLbuwp35z/download -O toolchain
-	tar xfj toolchain -C .
+	
+	wget -qO- https://nextcloud.os.in.tum.de/s/oHeGQp3rVk5MPpQ/download | tar xfJ -
+	
+#	wget https://nextcloud.os.in.tum.de/s/9idiw8BLbuwp35z/download -O toolchain
+#	tar xfj toolchain -C .
 #
 # ================================================================
 
@@ -40,7 +44,8 @@ toolchain:
 # Download Genode external sources. Only needs to be done once per system.
 ports:
 
-	./genode/tool/ports/prepare_port libc stdcxx lwip openssl zlib libmosquitto libprotobuf dde_ipxe dde_linux foc
+	./genode/tool/ports/prepare_port libc lwip openssl zlib libmosquitto libprotobuf dde_ipxe dde_linux foc
+#	stdcxx 
 
 #
 # ================================================================
@@ -52,7 +57,7 @@ ports:
 build_dir:
 	#workaround for changing target on compiled libs
 	rm -rf genode/contrib/libmosquitto*
-	rm -rf genode/controb/libprotobuf*
+	rm -rf genode/contrib/libprotobuf*
 	./genode/tool/ports/prepare_port libmosquitto libprotobuf
 	#end workaround
 	genode/tool/create_builddir $(GENODE_TARGET) BUILD_DIR=$(VAGRANT_GENODE_BUILD_DIR)
@@ -98,6 +103,7 @@ ifneq (,$(findstring x86_64, $(GENODE_TARGET)))
 else
 	echo "CROSS_DEV_PREFIX=$(shell pwd)/usr/local/genode-gcc/bin/genode-arm-" >> $(JENKINS_TOOLS_CONF)
 endif
+	echo "CC_CXX_WARN_STRICT=" >> $(JENKINS_TOOLS_CONF)
 
 # Delete build directory for all target systems. In some cases, subfolders in the contrib directory might be corrupted. Remove manually and re-prepare if necessary.
 clean:
