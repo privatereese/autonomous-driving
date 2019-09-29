@@ -6,6 +6,7 @@
 
 /*pub*/
 #include <publisher.h>
+#include <ecu/ecu.h>
 
 enum STATE { SEARCHING, CALCULATING, CONTROLLING, PARKED };
 
@@ -113,6 +114,6 @@ public:
 	/*
 	 * main method of the algorithm; calculate the actuator data based on the state while processing the range data from sensors
 	 */
-	void receiveData(double sensor_front, double sensor_right, double sensor_back, double spin_velocity, double timestamp);
+	void receiveData(double sensor_front, double sensor_right, double sensor_back, double spin_velocity, double timestamp, ecu &_ecu);
 
 };

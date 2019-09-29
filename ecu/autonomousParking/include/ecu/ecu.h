@@ -27,9 +27,10 @@ private:
 	void on_message(const struct mosquitto_message *message);
 
 	void readAllBytes(void *buf, int socket, unsigned int size);
-	void myPublish(const char *type, float value);
+	
 
 public:
 	ecu(const char *id, Libc::Env &env);
+	void myPublish(const char *type, float value);
 	~ecu();
 };

@@ -36,7 +36,6 @@ extern "C"
 #include <base/attached_rom_dataspace.h>
 #include <libc/component.h>
 #include <semaphore.h>
-#include <ecu/ecu.h>
 
 /* Float variables that are updated on realtime by on message calls
    Needed to feed the parking algorithm with up to date values */
@@ -220,7 +219,7 @@ void ecu::on_message(const struct mosquitto_message *message)
 	if (go && got_laser0 && got_laser1 && got_laser2 && got_spinVel)
 	{
 		//Genode::log("laser0: ", laser0, " laser1: ",laser1," laser2: ", laser2, " laser3: " ,laser3 , " spinvel: ",spinVel0);
-		parking->receiveData(laser0, laser1, laser2, spinVel0, timestamp);
+		parking->receiveData(laser0, laser1, laser2, spinVel0, timestamp, *this);
 		got_laser0 = false;
 		got_laser1 = false;
 		got_laser2 = false;
@@ -269,85 +268,41 @@ ecu::ecu(const char *id, Libc::Env &_env) : mosquittopp(id)
 	sem_init(&allValSem, 0, 1);
 	sem_init(&allData, 0, 0);
 	mosqpp::lib_init();
-	Timer::Connection _timer;
-	//lwip_tcpip_init(); /* causes freeze, code works fine without it */
 
 	Genode::Attached_rom_dataspace _config(_env, "config");
-	/* get config */
+	/* configure mosquitto library */
 	Genode::Xml_node mosquitto = _config.xml().sub_node("mosquitto");
-
-	int sock;
-
-	char ip_addr[16] = {0};
-	unsigned int port = 0;
-
-	int ret;
-
-	struct sockaddr_in srv_addr;
-	bzero(&srv_addr, sizeof(srv_addr));
-	srv_addr.sin_family = AF_INET;
-	srv_addr.sin_addr.s_addr = inet_addr(ip_addr);
-	srv_addr.sin_port = htons(port);
-
-	if ((sock = lwip_socket(AF_INET, SOCK_STREAM, 0)) == -1)
-	{
-		Genode::error("socket failed: ", (const char *)strerror(errno));
-	}
-
-	while ((ret = lwip_connect(sock, (struct sockaddr *)&srv_addr, sizeof(srv_addr)) == -1))
-	{
-		Genode::error("connect failed: ", (const char *)strerror(errno));
-		lwip_close(sock);
-		if ((sock = lwip_socket(AF_INET, SOCK_STREAM, 0)) == -1)
-		{
-			Genode::error("socket failed: ", (const char *)strerror(errno));
-		}
-	}
-
-	/* disable Nagle's algorithm */
-	int flag = 1;
-	int result = lwip_setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (char *)&flag, sizeof(int));
-	if (result == -1)
-	{
-		Genode::error("setsockopt failed: ", (const char *)strerror(errno));
-	}
-
-	try
-	{
+	try {
 		mosquitto.attribute("ip-address").value(this->host, sizeof(host));
-	}
-	catch (Genode::Xml_node::Nonexistent_attribute)
-	{
+	} catch(Genode::Xml_node::Nonexistent_attribute) {
 		Genode::error("mosquitto ip-address is missing from config");
 	}
 	this->port = mosquitto.attribute_value<unsigned int>("port", 1883);
 	this->keepalive = mosquitto.attribute_value<unsigned int>("keepalive", 60);
 
-	Genode::log("waiting for MQTT");
-	timer.msleep(5000);
-	Genode::log("waiting finished");
-
 	/* connect to mosquitto server */
-	do
-	{
-		ret = this->connect(this->host, this->port, this->keepalive);
-		switch (ret)
-		{
+	
+	int ret;
+	do {
+		ret = this->connect(host, port, keepalive);
+		Genode::log("I am alive!");
+		switch(ret) {
 		case MOSQ_ERR_INVAL:
 			Genode::error("invalid parameter for mosquitto connect");
 			return;
 		case MOSQ_ERR_ERRNO:
-			break;
 			Genode::log("mosquitto ", (const char *)strerror(errno));
+		default:
+			timer.msleep(1000);
+			break;
 		}
-	} while (ret != MOSQ_ERR_SUCCESS);
-
+	} while(ret != MOSQ_ERR_SUCCESS);
+	Genode::log("I am connected to mosquittoooo!");
+	
 	/* subscribe to topic */
-	do
-	{
+	do {
 		ret = this->subscribe(NULL, topic);
-		switch (ret)
-		{
+		switch(ret) {
 		case MOSQ_ERR_INVAL:
 			Genode::error("invalid parameter for mosquitto subscribe");
 			return;
@@ -358,7 +313,22 @@ ecu::ecu(const char *id, Libc::Env &_env) : mosquittopp(id)
 			Genode::error("not connected to a broker");
 			return;
 		}
-	} while (ret != MOSQ_ERR_SUCCESS);
+	} while(ret != MOSQ_ERR_SUCCESS);
+
+	/* start non-blocking loop */
+	ret = this->loop_start();
+	if (ret != MOSQ_ERR_SUCCESS) {
+		switch(ret) {
+		case MOSQ_ERR_INVAL:
+			Genode::error("invalid parameter for mosquitto loop_start");
+			return;
+		case MOSQ_ERR_NOT_SUPPORTED:
+			Genode::error("mosquitto no thread support");
+			return;
+		}
+	}
+	Genode::log("I am getting to mainloop!");
+
 
 	/* initiate any value with false, you never know... */
 	got_laser0 = false;
@@ -373,10 +343,20 @@ ecu::ecu(const char *id, Libc::Env &_env) : mosquittopp(id)
 
 	Genode::log("done");
 
-	Genode::log("for loop mosq");
-	/* start non-blocking mosquitto loop */
-	loop_start();
-	Genode::log("aftr loop mosq");
+	/* start non-blocking loop */
+	ret = this->loop_start();
+	if (ret != MOSQ_ERR_SUCCESS)
+	{
+		switch (ret)
+		{
+		case MOSQ_ERR_INVAL:
+			Genode::error("invalid parameter for mosquitto loop_start");
+			return;
+		case MOSQ_ERR_NOT_SUPPORTED:
+			Genode::error("mosquitto no thread support");
+			return;
+		}
+	}
 	/* loop_start creates a thread and makes it possible to execute code afterwards
 	   loop_forever creates a thread and lets no code run afterwards */
 	/* cleanup */

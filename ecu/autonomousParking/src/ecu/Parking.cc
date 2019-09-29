@@ -10,7 +10,6 @@
 
 #include <base/component.h>
 #include <base/printf.h>
-#include <ecu/ecu.h>
 
 /* etc */
 #include <cstdio>
@@ -175,7 +174,7 @@ bool Parking::_lateralCondition(double startX, double endX, double startY, doubl
     return fabs(((startX - endX) * sin(start_angle)) + ((endY - startY) * cos(start_angle))) < _map.getLateralDisplacement();
 }
 
-void Parking::receiveData(double sensor_front, double sensor_right, double sensor_back, double spin_velocity, double timestamp){
+void Parking::receiveData(double sensor_front, double sensor_right, double sensor_back, double spin_velocity, double timestamp, ecu &_ecu){
     // update sampling period to latest timestamp received
     _sampling_period = timestamp;
 
@@ -244,11 +243,11 @@ void Parking::receiveData(double sensor_front, double sensor_right, double senso
         }
 
     // publish the calculated actuator data
-	myPublish("0", _actuator_steering);
-	myPublish("4", _actuator_velocity);
+	_ecu.myPublish("0", _actuator_steering);
+	_ecu.myPublish("4", _actuator_velocity);
 	if(_state==PARKED)
 	{
-		myPublish("3", 0);
+		_ecu.myPublish("3", 0);
 	}
 
         return;
