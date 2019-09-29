@@ -2,21 +2,19 @@
 #include <semaphore.h>
 #include <base/component.h>
 #include <libc/component.h>
-/* protobuf include */
-#include <state.pb.h>
-#include <control.pb.h>
+#include <stdlib.h>
 
 /* fix redefinition of struct timeval */
 #define timeval _timeval
 
-class savm : public mosqpp::mosquittopp
+class ecu : public mosqpp::mosquittopp
 {
-	private:
+private:
 	/* mosquitto */
 	char host[16];
-	const char* id = "savm";
-	const char* topic = "car-control/#";
-	const char* topicsub = "state/#";
+	const char *id = "ecu";
+	const char *topic = "car-control/#";
+	const char *topicsub = "state/#";
 	int port;
 	int keepalive;
 
@@ -31,7 +29,7 @@ class savm : public mosqpp::mosquittopp
 	void readAllBytes(void *buf, int socket, unsigned int size);
 	void myPublish(const char *type, float value);
 
-	public:
-	savm(const char* id, Libc::Env &env);
-	~savm();
+public:
+	ecu(const char *id, Libc::Env &env);
+	~ecu();
 };

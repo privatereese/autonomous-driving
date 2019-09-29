@@ -57,10 +57,6 @@ Timer::Connection timer;
 uint64_t starttime, stoptime, duration, totalduration, calculationroundscounter, minval, maxval = 0;
 uint64_t CONNstarttime, CONNstoptime, CONNduration, CONNtotalduration, CONNcalculationroundscounter, CONNminval, CONNmaxval = 0;
 
-sem_t allValSem;
-sem_t allData;
-int allValues;
-
 void savm::readAllBytes(void *buf, int socket, unsigned int size)
 {
 	unsigned int offset = 0;
@@ -80,12 +76,11 @@ void savm::readAllBytes(void *buf, int socket, unsigned int size)
 	} while (offset != size);
 }
 
-void savm::myPublish(const char *type, const char *value)
+void savm::myPublish(const char *type, float value)
 {
-	char topic[1024];
-	strcpy(topic, "state");
-	strncat(topic, type, sizeof(topic));
-	publish(NULL, topic, strlen(value), value);
+	char buffer[1024] = {0};
+	sprintf(buffer, "%s; %f;", type, value);
+	/* int ret = */ publish(NULL, "state", strlen(buffer), buffer);
 }
 
 /* Receive car control messages from server and store them in corresponding values locally.
@@ -104,38 +99,51 @@ void savm::on_message(const struct mosquitto_message *message)
 	//std::string payload = (char *)message->payload;
 	//const char *name = payload.substr(0, payload.find(",")).c_str();
 
-	if (!strcmp(type, "0"))
+
+/* Take first part of message, alias identifier to decide which value arrived */
+	std::string payload = (char*)message->payload;
+	const char* name = payload.substr(0, payload.find(",")).c_str();
+
+	if(!strcmp(name,"0"))
 	{
-		steer = atof(value);
+		payload.erase(0, payload.find(",")+1);
+		steer=atof(payload.c_str());
 	}
-	if (!strcmp(type, "1"))
+	if(!strcmp(name,"1"))
 	{
-		brake = atof(value);
+		payload.erase(0, payload.find(",")+1);
+		brake=atof(payload.c_str());
+
 	}
-	if (!strcmp(type, "2"))
+	if(!strcmp(name,"2"))
 	{
-		steer = atof(value);
+		payload.erase(0, payload.find(",")+1);
+		accel=atof(payload.c_str());
+
 	}
-	if (!strcmp(type, "3"))
+	if(!strcmp(name,"3"))
 	{
-		float tmp = atof(value);
-		if (tmp > 0)
+		payload.erase(0, payload.find(",")+1);
+		float tmp=atof(payload.c_str());
+		if(tmp>0)
 		{
-			autonomous = true;
+			autonomous=true;
 		}
 		else
 		{
-			autonomous = false;
+			autonomous=false;
 		}
 	}
-	if (!strcmp(type, "4"))
+	if(!strcmp(name,"4"))
 	{
-
-		speed = atof(value);
+		payload.erase(0, payload.find(",")+1);
+		speed=atof(payload.c_str());
 	}
+	Genode::log("Speed: " ,speed, " brake: ", brake, " accel: ", accel, " steer: " ,steer);
+
 
 	sem_wait(&allValSem);
-	allValues = (allValues + 1) % 4;
+	allValues = (allValues + 1) % 2;
 	if (!allValues)
 	{
 		sem_post(&allData);
@@ -247,10 +255,14 @@ savm::savm(const char *id, Libc::Env &_env) : mosquittopp(id)
 	this->port = mosquitto.attribute_value<unsigned int>("port", 1883);
 	this->keepalive = mosquitto.attribute_value<unsigned int>("keepalive", 60);
 
+	Genode::log("waiting for MQTT");
+	timer.msleep(5000);
+	Genode::log("waiting finished");
+
 	/* connect to mosquitto server */
 	do
 	{
-		ret = this->connect(host, port, keepalive);
+		ret = this->connect(this->host, this->port, this->keepalive);
 		switch (ret)
 		{
 		case MOSQ_ERR_INVAL:
@@ -283,6 +295,7 @@ savm::savm(const char *id, Libc::Env &_env) : mosquittopp(id)
 	Genode::log("for loop mosq");
 	/* start non-blocking mosquitto loop */
 	loop_start();
+	Genode::log("aftr loop mosq");
 
 	char val[512] = {0};
 	uint32_t msg_len = 0;
@@ -291,7 +304,7 @@ savm::savm(const char *id, Libc::Env &_env) : mosquittopp(id)
 	/* Init size of protobuf message with 0 */
 	int size = 0;
 	/* Allocate ram dataspace where protobuf message will be stored */
-	Genode::Ram_dataspace_capability state_ds = _env.ram->alloc(1024);
+	Genode::Ram_dataspace_capability state_ds = _env.ram().alloc(1024);
 	/* Attach dataspace to our rm session */
 	char *bar = _env.rm().attach(state_ds);
 	while (true)
@@ -313,58 +326,58 @@ savm::savm(const char *id, Libc::Env &_env) : mosquittopp(id)
 		/*******************
 		 ** SensorDataOut **
 		 *******************/
-		
+
 		if (size > 0)
 		{
-			
+
 			lwip_read(sock, bar, ntohl(size));
 			protobuf::State state;
 			/* Deserialize from char* to state */
 			state.ParseFromArray(bar, size);
 			/* Publish any value we got from SD2 */
-			snprintf(val, sizeof(val), "%f", state.steer());
-			myPublish("steer", val);
-			snprintf(val, sizeof(val), "%f", state.brakecmd());
-			myPublish("brake", val);
-			snprintf(val, sizeof(val), "%f", state.accelcmd());
-			myPublish("accel", val);
-			snprintf(val, sizeof(val), "%f", state.wheel(0).spinvel());
-			myPublish("wheel0", val);
-			snprintf(val, sizeof(val), "%f", state.wheel(1).spinvel());
-			myPublish("wheel1", val);
-			snprintf(val, sizeof(val), "%f", state.wheel(2).spinvel());
-			myPublish("wheel2", val);
-			snprintf(val, sizeof(val), "%f", state.wheel(3).spinvel());
-			myPublish("wheel3", val);
-			snprintf(val, sizeof(val), "%f", state.specification().length());
-			myPublish("length", val);
-			snprintf(val, sizeof(val), "%f", state.specification().width());
-			myPublish("width", val);
-			snprintf(val, sizeof(val), "%f", state.specification().wheelradius());
-			myPublish("wheelRadius", val);
-			snprintf(val, sizeof(val), "%f", state.specification().steerlock());
-			myPublish("steerlock", val);
-			snprintf(val, sizeof(val), "%f", state.timestamp());
-			myPublish("timestamp", val);
+			float steerCmd = state.steer();
+			myPublish("steer", steerCmd);
+			float brakeCmd = state.brakecmd();
+			myPublish("brake", brakeCmd);
+			float accelCmd = state.accelcmd();
+			myPublish("accel", accelCmd);
+			float spinVel0 = state.wheel(0).spinvel();
+			myPublish("wheel0", spinVel0);
+			float spinVel1 = state.wheel(1).spinvel();
+			myPublish("wheel1", spinVel1);
+			float spinVel2 = state.wheel(2).spinvel();
+			myPublish("wheel2", spinVel2);
+			float spinVel3 = state.wheel(3).spinvel();
+			myPublish("wheel3", spinVel3);
+			float length = state.specification().length();
+			myPublish("length", length);
+			float width = state.specification().width();
+			myPublish("width", width);
+			float wheelRadius = state.specification().wheelradius();
+			myPublish("wheelRadius", wheelRadius);
+			float steerlock = state.specification().steerlock();
+			myPublish("steerlock", steerlock);
+			float timestamp = state.timestamp();
+			myPublish("timestamp", timestamp);
 			/* Go through sensors */
 			for (int i = 0; i < state.sensor().size(); i++)
 			{
 				/* GPS sensor */
 				if (state.sensor(i).type() == protobuf::Sensor_SensorType_GPS)
 				{
-					snprintf(val, sizeof(val), "%f", state.sensor(i).value(0));
-					myPublish("gps_x", val);
-					snprintf(val, sizeof(val), "%f", state.sensor(i).value(1));
-					myPublish("gps_y", val);
+					float gps_x = state.sensor(i).value(0);
+					myPublish("gps_x", gps_x);
+					float gps_y = state.sensor(i).value(1);
+					myPublish("gps_y", gps_y);
 				}
 				/* Laser sensor */
 				else
 				{
-					snprintf(val, sizeof(val), "%f", state.sensor(i).value(0));
+					float laser = state.sensor(i).value(0);
 					char buffer[1024] = {0};
 					sprintf(buffer, "laser%d", i);
 					const char *name = buffer;
-					myPublish(name, val);
+					myPublish(name, laser);
 				}
 			}
 
@@ -395,54 +408,39 @@ savm::savm(const char *id, Libc::Env &_env) : mosquittopp(id)
 			{
 				Genode::error("write cdi failed! ", (const char *)strerror(errno));
 			}
-			else if ((unsigned int)ret < msg_len)
-			{
-				Genode::error("write cdi failed to send complete message! ",
-							  ret,
-							  " vs. ",
-							  msg_len);
-			}
 
 			ret = lwip_write(sock, (void *)foo.c_str(), foo.size());
 			if (ret == -1)
 			{
 				Genode::error("write cdi failed! ", (const char *)strerror(errno));
 			}
-			else if ((unsigned int)ret < msg_len)
-			{
-				Genode::error("write cdi failed to send complete message! ",
-							  ret,
-							  " vs. ",
-							  msg_len);
-			}
 		}
 		else
 		{
 			Genode::error("Unknown message: %d", msg_len);
 		}
-		_env.ram->free(state_ds);
-	}
 
-	CONNstoptime = timer.elapsed_ms();
-	CONNduration = CONNstoptime - CONNstarttime;
-	CONNtotalduration += CONNduration;
-	CONNcalculationroundscounter++;
+		CONNstoptime = timer.elapsed_ms();
+		CONNduration = CONNstoptime - CONNstarttime;
+		CONNtotalduration += CONNduration;
+		CONNcalculationroundscounter++;
 
-	if (CONNcalculationroundscounter == 1)
-	{
-		CONNminval = CONNduration;
+		if (CONNcalculationroundscounter == 1)
+		{
+			CONNminval = CONNduration;
+		}
+		CONNminval = std::min(CONNminval, CONNduration);
+		CONNmaxval = std::max(CONNmaxval, CONNduration);
+		if (CONNcalculationroundscounter % 500 == 0)
+		{
+			Genode::log("The CONNduration for calculation and sending was ", CONNduration, " milliseconds");
+			Genode::log("The CONNTOTALduration for calculation and sending was ", CONNtotalduration, " milliseconds");
+			Genode::log("The CONNMINduration for calculation and sending was ", CONNminval, " milliseconds");
+			Genode::log("The CONNMAXduration for calculation and sending was ", CONNmaxval, " milliseconds");
+			Genode::log("The CONNAVERAGEduration for calculation and sending was ", (CONNtotalduration / CONNcalculationroundscounter), " milliseconds after ", CONNcalculationroundscounter, " steps");
+		}
 	}
-	CONNminval = std::min(CONNminval, CONNduration);
-	CONNmaxval = std::max(CONNmaxval, CONNduration);
-	if (CONNcalculationroundscounter % 500 == 0)
-	{
-		Genode::log("The CONNduration for calculation and sending was ", CONNduration, " milliseconds");
-		Genode::log("The CONNTOTALduration for calculation and sending was ", CONNtotalduration, " milliseconds");
-		Genode::log("The CONNMINduration for calculation and sending was ", CONNminval, " milliseconds");
-		Genode::log("The CONNMAXduration for calculation and sending was ", CONNmaxval, " milliseconds");
-		Genode::log("The CONNAVERAGEduration for calculation and sending was ", (CONNtotalduration / CONNcalculationroundscounter), " milliseconds after ", CONNcalculationroundscounter, " steps");
-	}
-	Genode::env()->pd_session.free(state_ds);
+	_env.ram().free(state_ds);
 }
 
 /* TODO */
