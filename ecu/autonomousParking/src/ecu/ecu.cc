@@ -315,6 +315,21 @@ ecu::ecu(const char *id, Libc::Env &_env) : mosquittopp(id)
 		}
 	} while(ret != MOSQ_ERR_SUCCESS);
 
+
+
+	/* initiate any value with false, you never know... */
+	got_laser0 = false;
+	got_laser1 = false;
+	got_laser2 = false;
+	got_spinVel = false;
+	car_complete = false;
+	got_length = false;
+	got_width = false;
+	got_wheelRadius = false;
+	go = false;
+
+	Genode::log("done");
+	
 	/* start non-blocking loop */
 	ret = this->loop_start();
 	if (ret != MOSQ_ERR_SUCCESS) {
@@ -330,33 +345,6 @@ ecu::ecu(const char *id, Libc::Env &_env) : mosquittopp(id)
 	Genode::log("I am getting to mainloop!");
 
 
-	/* initiate any value with false, you never know... */
-	got_laser0 = false;
-	got_laser1 = false;
-	got_laser2 = false;
-	got_spinVel = false;
-	car_complete = false;
-	got_length = false;
-	got_width = false;
-	got_wheelRadius = false;
-	go = false;
-
-	Genode::log("done");
-
-	/* start non-blocking loop */
-	ret = this->loop_start();
-	if (ret != MOSQ_ERR_SUCCESS)
-	{
-		switch (ret)
-		{
-		case MOSQ_ERR_INVAL:
-			Genode::error("invalid parameter for mosquitto loop_start");
-			return;
-		case MOSQ_ERR_NOT_SUPPORTED:
-			Genode::error("mosquitto no thread support");
-			return;
-		}
-	}
 	/* loop_start creates a thread and makes it possible to execute code afterwards
 	   loop_forever creates a thread and lets no code run afterwards */
 	/* cleanup */
