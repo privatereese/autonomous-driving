@@ -21,7 +21,7 @@ create_boot_directory
 #
 
 set config {
-<config>
+<config verbose="yes">
     <parent-provides>
       <service name="ROM"/>
 		  <service name="RAM"/>
@@ -33,7 +33,7 @@ set config {
 		  <service name="CPU"/>
 		  <service name="LOG"/>
     </parent-provides>
-    <default caps="100"/>
+    <default caps="400"/>
     <default-route>
         <any-service> <parent/> <any-child/> </any-service>
     </default-route>
@@ -41,11 +41,11 @@ set config {
         <resource name="RAM" quantum="1M"/>
         <provides><service name="Timer"/></provides>
     </start>
-    <start name="savm" caps="500">
+    <start name="savm" caps="2000">
         <resource name="RAM" quantum="40M"/>
 				<config>
             <network dhcp="no" ip-address="10.200.45.7" subnet-mask="255.255.255.0" default-gateway="10.200.45.6" />
-            <speedDreams ip-address="10.200.45.6" port="9002" />
+            <speed-dreams ip-address="10.200.45.6" port="9002" />
             <mosquitto ip-address="10.200.45.6" port="1883" />
         </config>
     </start>}
@@ -105,7 +105,7 @@ append_platform_drv_boot_modules
 build_boot_image $boot_modules
 
 # qemu config
-append qemu_args " -m 1024 -nographic -smp 4 "
+append qemu_args " -m 1022 -nographic -smp 4 "
 
 append qemu_args " -net nic,macaddr=02:00:00:00:01:03 "
 
