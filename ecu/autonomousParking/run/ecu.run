@@ -21,7 +21,7 @@ create_boot_directory
 #
 
 set config {
-<config>
+<config verbose="yes">
     <parent-provides>
       <service name="ROM"/>
 		  <service name="RAM"/>

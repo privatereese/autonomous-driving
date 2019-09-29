@@ -3,6 +3,7 @@
 #include <base/component.h>
 #include <libc/component.h>
 #include <stdlib.h>
+#include <base/env.h>
 
 /* fix redefinition of struct timeval */
 #define timeval _timeval

@@ -329,9 +329,9 @@ ecu::ecu(const char *id, Libc::Env &_env) : mosquittopp(id)
 	go = false;
 
 	Genode::log("done");
-	
+
 	/* start non-blocking loop */
-	ret = this->loop_start();
+	ret = loop_start();
 	if (ret != MOSQ_ERR_SUCCESS) {
 		switch(ret) {
 		case MOSQ_ERR_INVAL:
@@ -342,7 +342,7 @@ ecu::ecu(const char *id, Libc::Env &_env) : mosquittopp(id)
 			return;
 		}
 	}
-	Genode::log("I am getting to mainloop!");
+	
 
 
 	/* loop_start creates a thread and makes it possible to execute code afterwards
